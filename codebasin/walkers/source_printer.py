@@ -64,7 +64,7 @@ class PreprocessedSourcePrinter(TreeWalker):
                 for line in node_lines:
                     if self.expand_macros:
                         tokens = Lexer(line).tokenize()
-                        expansion = MacroExpander(tokens).expand(self.platform)
+                        expansion = MacroExpander(tokens, self.platform).expand()
                         for tok in expansion:
                             if tok.prev_white:
                                 output_lines.append(" ")
