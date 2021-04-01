@@ -593,7 +593,7 @@ class DefineNode(DirectiveNode):
         """
         Add a definition into the platform, and return false
         """
-        macro = Macro(self.identifier, self.args, self.value)
+        macro = make_macro(self.identifier, self.args, self.value)
         kwargs['platform'].define(self.identifier.as_str(), macro)
         return False
 
@@ -1195,43 +1195,81 @@ class DirectiveParser(Parser):
             raise ParseError("Not a directive.")
 
 
-class Macro():
+def macro_from_definition_string(string):
+    """
+    Construct a Macro or MacroFunction by parsing a string of the form
+    MACRO=expansion.
+    """
+    tokens = Lexer(string).tokenize()
+    parser = DirectiveParser(tokens)
+
+    (identifier, args) = parser.macro_definition()
+
+    # Any remaining tokens after an "=" are the macro expansion
+    if not parser.eol():
+        parser.match_value(Operator, "=")
+        expansion = parser.tokens[parser.pos:]
+        parser.pos = len(parser.tokens)
+    else:
+        expansion = NumericalConstant("Unknown", None, False, 1)
+
+    return make_macro(identifier, args, expansion)
+
+
+def make_macro(identifier, args, expansion):
+    """
+    Return a Macro or MacroFunction based on the contents of args.
+    """
+    if args is None:
+        return Macro(identifier, expansion)
+    else:
+        return MacroFunction(identifier, args, expansion)
+
+
+class Macro:
     """
     Represents a macro definition.
     """
 
-    def __init__(self, name, args=None, expansion=None):
-        self.name = str(name)
-        if args is not None:
-            self.args = [str(a) for a in args]
-        else:
-            self.args = None
+    def __init__(self, name, expansion):
+        self.name = name.as_str()
         self.expansion = expansion
 
     def __repr__(self):
-        return "Macro(name={0!r},args={1!r},expansion={2!r})".format(
+        return "Macro(name={0!r},expansion={1!r})".format(
+            self.name, self.expansion)
+
+    def spelling(self):
+        expansion_str = " ".join([str(t) for t in self.expansion])
+        return ["{0!s}={1!s}".format(self.name, expansion_str)]
+
+    def expand(self):
+        return self.expansion
+
+
+class MacroFunction(Macro):
+    """
+    Represents a macro function definition.
+    """
+
+    def __init__(self, name, args, expansion):
+        super().__init__(name, expansion)
+        self.args = [x.as_str() for x in args]
+
+    def __repr__(self):
+        return "MacroFunction(name={0!r},args={1!r},expansion={2!r})".format(
             self.name, self.args, self.expansion)
 
     def spelling(self):
         expansion_str = " ".join([str(t) for t in self.expansion])
-        if self.args is None:
-            return ["{0!s}={1!s}".format(self.name, expansion_str)]
-        arg_str = ",".join(self.args)
+        arg_str = ",".join([str(t) for t in self.args])
         return ["{0!s}({1!s})={2!s}".format(self.name, arg_str, expansion_str)]
-
-    def is_function(self):
-        """
-        Return true if macro is function-like
-        """
-        return self.args is not None
 
     def is_variadic(self):
         """
         Return true if macro is variadic
         """
-        if self.is_function() and self.args:
-            return self.args[-1].endswith("...")
-        return False
+        return self.args[-1].endswith("...")
 
     def variable_argument(self):
         """
@@ -1248,26 +1286,43 @@ class Macro():
         else:
             return None
 
-    @staticmethod
-    def from_definition_string(string):
-        """
-        Construct a Macro by parsing a string of the form
-        MACRO=expansion.
-        """
-        tokens = Lexer(string).tokenize()
-        parser = DirectiveParser(tokens)
+    def expand(self, expanded_args):
+        # Combine variadic arguments into one, separated by commas
+        va_args = None
+        if self.is_variadic():
+            va_args = []
+            for idx in range(len(self.args) - 1, len(expanded_args) - 1):
+                va_args.append(expanded_args[idx])
+                va_args.append([Punctuator("EXPANSION", -1, False, ",")])
+            if len(self.args) - 1 < len(expanded_args):
+                va_args.append(expanded_args[-1])
 
-        (identifier, args) = parser.macro_definition()
+        # Substitute each occurrence of an argument in the expansion
+        substituted_tokens = []
+        for token in self.expansion:
 
-        # Any remaining tokens after an "=" are the macro expansion
-        if not parser.eol():
-            parser.match_value(Operator, "=")
-            expansion = parser.tokens[parser.pos:]
-            parser.pos = len(parser.tokens)
-        else:
-            expansion = NumericalConstant("Unknown", None, False, 1)
+            substitution = []
 
-        return Macro(identifier, args, expansion)
+            # If a token matches an argument, it is substituted;
+            # otherwise it passes through
+            try:
+                substitution = expanded_args[self.args.index(token.token)]
+            except (ValueError, ParseError):
+                substitution = [token]
+
+            # If a token matches the variable argument, substitute
+            # precomputed va_args
+            if self.is_variadic() and token.token == self.variable_argument() and va_args:
+
+                # Whether the token was preceded by whitespace should be
+                # tracked through substitution
+                for t in va_args[0]:
+                    t.prev_white = token.prev_white
+                substitution = [item for lst in va_args for item in lst]
+
+            substituted_tokens.extend(substitution)
+
+        return substituted_tokens
 
 
 class MacroStack:
@@ -1421,42 +1476,9 @@ class MacroExpander(Parser):
 
         # Argument pre-scan
         # Macro arguments are macro-expanded before substitution
-        expanded_args = [self.subexpand(arg) for arg in args]
+        expanded_args = [self.subexpand(a) for a in args]
 
-        # Combine variadic arguments into one, separated by commas
-        va_args = None
-        if macro.is_variadic():
-            va_args = []
-            for idx in range(len(macro.args) - 1, len(expanded_args) - 1):
-                va_args.append(expanded_args[idx])
-                va_args.append([Punctuator("EXPANSION", -1, False, ",")])
-            if len(macro.args) - 1 < len(expanded_args):
-                va_args.append(expanded_args[-1])
-
-        # Substitute each occurrence of an argument in the expansion
-        substituted_tokens = []
-        for token in macro.expansion:
-
-            substitution = []
-
-            # If a token matches an argument, it is substituted;
-            # otherwise it passes through
-            try:
-                substitution = expanded_args[macro.args.index(token.token)]
-            except (ValueError, ParseError):
-                substitution = [token]
-
-            # If a token matches the variable argument, substitute
-            # precomputed va_args
-            if macro.is_variadic() and token.token == macro.variable_argument() and va_args:
-
-                # Whether the token was preceded by whitespace should be
-                # tracked through substitution
-                for t in va_args[0]:
-                    t.prev_white = token.prev_white
-                substitution = [item for lst in va_args for item in lst]
-
-            substituted_tokens.extend(substitution)
+        substituted_tokens = macro.expand(expanded_args)
 
         # Check the expansion for macros to expand
         return self.subexpand(substituted_tokens, identifier)
@@ -1475,7 +1497,7 @@ class MacroExpander(Parser):
             if not macro:
                 raise TokenError('Not a macro.')
 
-            return self.subexpand(macro.expansion, identifier)
+            return self.subexpand(macro.expand(), identifier)
         except TokenError:
             self.pos = initial_pos
             raise ParseError("Not a macro.")
