@@ -491,18 +491,19 @@ class CodeNode(Node):
     number of countable lines occurring between them.
     """
 
-    def __init__(self, start_line=-1, end_line=-1, num_lines=0):
+    def __init__(self, start_line=-1, end_line=-1, num_lines=0, body=[]):
         super().__init__()
         self.start_line = start_line
         self.end_line = end_line
         self.num_lines = num_lines
+        self.body = body
 
     def __repr__(self):
         return "CodeNode(start={0!r},end={1!r},lines={2!r}".format(
             self.start_line, self.end_line, self.num_lines)
 
     def __str__(self):
-        return "Lines {}-{}; SLOC = {};".format(self.start_line, self.end_line, self.num_lines)
+        return "\n".join(self.body)
 
 
 class DirectiveNode(CodeNode):
