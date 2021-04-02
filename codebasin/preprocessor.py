@@ -13,7 +13,7 @@ import collections
 import hashlib
 import numpy as np
 from . import util
-from . import walkers
+from .walkers.tree_associator import TreeAssociator
 
 log = logging.getLogger('codebasin')
 
@@ -676,7 +676,7 @@ class IncludeNode(DirectiveNode):
         if include_file and kwargs['platform'].process_include(include_file):
             kwargs['state'].insert_file(include_file)
 
-            associator = walkers.TreeAssociator(kwargs['state'].get_tree(
+            associator = TreeAssociator(kwargs['state'].get_tree(
                 include_file), kwargs['state'].get_map(include_file))
             associator.walk(kwargs['platform'], kwargs['state'])
 
