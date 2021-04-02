@@ -31,14 +31,21 @@ class PreprocessedSourcePrinter(TreeWalker):
         """
         Walk the tree, printing the result of each node after preprocessing.
         """
-        self.__print_nodes(self.tree.root)
+        self.__print_nodes(self.tree.root, self._node_associations)
 
-    def __print_nodes(self, node):
+    def __print_nodes(self, _node, _map):
         """
         Print this specific node, then descend into its children nodes.
         """
-        if type(node).__name__ != 'FileNode':
-            print(node.spelling())
+        # This is equivalent to isinstance(CodeNode), without needing to
+        # import lexer.
+        if 'num_lines' in dir(_node) and type(_node).__name__ != 'FileNode':
+            association = _map.get_association(_node)
+            if association and not isinstance(_node, DirectiveNode):
+                print(_node.spelling())
+            else:
+                # Replace unused code with whitespace
+                print()
 
-        for child in node.children:
-            self.__print_nodes(child)
+        for child in _node.children:
+            self.__print_nodes(child, _map)
