@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from .tree_walker import TreeWalker
-from codebasin.preprocessor import CodeNode, DirectiveNode, FileNode
+from codebasin.preprocessor import CodeNode, DirectiveNode, FileNode, Lexer, MacroExpander
 
 class SourcePrinter(TreeWalker):
     """
@@ -31,6 +31,10 @@ class PreprocessedSourcePrinter(TreeWalker):
     """
     TreeWalker that prints preprocessed source code.
     """
+    def __init__(self, _tree, _node_associations, _platform):
+        super().__init__(_tree, _node_associations)
+        self.platform = _platform
+        self.expand_macros = True
 
     def walk(self):
         """
@@ -45,7 +49,13 @@ class PreprocessedSourcePrinter(TreeWalker):
         if isinstance(_node, CodeNode):
             association = _map[_node]
             if association and not isinstance(_node, DirectiveNode):
-                print(_node.spelling())
+                line = _node.spelling()
+                if self.expand_macros:
+                    tokens = Lexer(line).tokenize()
+                    expansion = MacroExpander(tokens).expand(self.platform)
+                    # TODO: revisit this after Jason's token-list fixes
+                    line = "".join([str(token) for token in expansion])
+                print(line)
             else:
                 # Replace unused code with whitespace
                 print()
