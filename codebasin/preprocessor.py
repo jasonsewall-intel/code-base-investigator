@@ -45,6 +45,9 @@ class Token():
     def spelling(self):
         return [str(self.token)]
 
+    def sanitized_str(self):
+        return str(self)
+
 
 class CharacterConstant(Token):
     """
@@ -299,7 +302,7 @@ class Lexer:
         for p in tokens:
             if p.prev_white:
                 parts.append(" ")
-            parts.append(str(p))
+            parts.append(p.sanitized_str())
         parts.append('"')
         return Lexer("".join(parts)).tokenize_one()
 
