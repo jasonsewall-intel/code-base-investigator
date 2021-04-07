@@ -3,7 +3,7 @@
 
 import unittest
 import logging
-from codebasin import config, finder, walkers
+from codebasin import config, finder, walkers, preprocessor, platform
 from codebasin.walkers.platform_mapper import PlatformMapper
 
 class TestExampleFile(unittest.TestCase):
@@ -26,6 +26,14 @@ class TestExampleFile(unittest.TestCase):
         setmap = mapper.walk(state)
         self.assertDictEqual(setmap, self.expected_setmap, "Mismatch in setmap")
 
+    def test_paths(self):
+        input_str = r'FUNCTION(looks/2like/a/path/with_/bad%%identifiers)'
+        tokens = preprocessor.Lexer(input_str).tokenize()
+        p = platform.Platform("Test", self.rootdir)
+        macro = preprocessor.macro_from_definition_string("FUNCTION(x)=#x")
+        p._definitions = {macro.name : macro }
+        exp = preprocessor.MacroExpander(tokens, p).expand()
+        print(str(exp))
 
 if __name__ == '__main__':
     unittest.main()
