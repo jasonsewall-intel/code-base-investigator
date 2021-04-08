@@ -56,15 +56,16 @@ class PreprocessedSourcePrinter(TreeWalker):
                          'filename': self.tree.root.filename,
                          'state': self.state}
             _node.evaluate_for_platform(**eval_args)
-
+            expander = MacroExpander(self.platform)
             if association and not isinstance(_node, DirectiveNode):
                 node_lines = _node.spelling()
+
                 # TODO: revisit this after Jason's token-list fixes
                 output_lines = []
                 for line in node_lines:
                     if self.expand_macros:
                         tokens = Lexer(line).tokenize()
-                        expansion = MacroExpander(tokens, self.platform).expand()
+                        expansion = expander.expand(tokens)
                         for tok in expansion:
                             if tok.prev_white:
                                 output_lines.append(" ")

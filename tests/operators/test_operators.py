@@ -32,8 +32,7 @@ class TestExampleFile(unittest.TestCase):
         p = platform.Platform("Test", self.rootdir)
         macro = preprocessor.macro_from_definition_string("FUNCTION(x)=#x")
         p._definitions = {macro.name : macro }
-        exp = preprocessor.MacroExpander(tokens, p).expand()
-        print(str(exp))
+        exp = preprocessor.MacroExpander(p).expand(tokens)
 
 if __name__ == '__main__':
     unittest.main()
