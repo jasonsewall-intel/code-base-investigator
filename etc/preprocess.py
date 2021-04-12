@@ -14,7 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
 # pylint: disable=wrong-import-position
 from codebasin.walkers.source_printer import SourcePrinter, PreprocessedSourcePrinter  # nopep8
-from codebasin.preprocessor import Macro  # nopep8
+from codebasin.preprocessor import macro_from_definition_string  # nopep8
 from codebasin.platform import Platform  # nopep8
 import codebasin.finder as finder  # nopep8
 
@@ -60,7 +60,7 @@ if __name__ == '__main__':
     for path in args.include_paths:
         platform.add_include_path(path)
     for definition in args.defines:
-        macro = Macro.from_definition_string(definition)
+        macro = macro_from_definition_string(definition)
         platform.define(macro.name, macro)
 
     source_tree = state.get_tree(file_path)
