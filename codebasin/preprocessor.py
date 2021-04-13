@@ -23,6 +23,11 @@ class TokenError(ValueError):
     Represents an error encountered during tokenization.
     """
 
+class EndofParse(ValueError):
+    """
+    Represents end of token stream.
+    """
+
 
 class Token():
     """
@@ -104,13 +109,16 @@ class Identifier(Token):
     """
     Represents a C identifier.
     """
+    def __init__(self, line, col, prev_white, token):
+        super().__init__(line, col, prev_white, token)
+        self.expandable = True
 
     def as_str(self):
         return str(self.token)
 
     def __repr__(self):
-        return "Identifier(line={!r},col={!r},prev_white={!r},token={!r})".format(
-            self.line, self.col, self.prev_white, self.token)
+        return "Identifier(line={!r},col={!r},prev_white={!r},expandable={!r},token={!r})".format(
+            self.line, self.col, self.prev_white, self.expandable, self.token)
 
 
 class Operator(Token):
@@ -1445,11 +1453,40 @@ class MacroExpander:
     def top(self):
         return self.parser_stack[-1]
 
+    def pop(self):
+        if len(self.parser_stack) == 1 or self.top().pre_expand:
+            raise EndofParse("Hit end of input streams")
+        top_toks = self.top().tokens
+        self.parser_stack.pop()
+        self.no_expand.pop()
+        self.top().tokens = self.top().tokens[:self.top().pos] + top_toks + self.top().tokens[self.top().pos:]
+        #print(f"POP: {''.join((str(x) for x in top_toks))} -> {''.join((str(x) for x in self.top().tokens))}")
+        print(f"POP: {top_toks} -> {self.top().tokens} {self.top().pos}")
+
+    def push(self, tokens, ident=None):
+        print(f"PUSH: {''.join((str(x) for x in tokens))}, {ident}")
+        self.parser_stack.append(Parser(tokens))
+        self.top().pre_expand = False
+        self.no_expand.append(ident)
+
+    def advance(self, step=1, consume=False):
+        for _ in range(step):
+            if consume:
+                del self.top().tokens[self.top().pos]
+            else:
+                self.top().pos += 1
+            while self.top().eol():
+                self.pop()
+            print(f"ADV: {len(self.parser_stack)}: {self.top().pos}/{len(self.top().tokens)} {self.ctok()}")
+
+    def ctok(self, offs=0):
+        return self.top().tokens[self.top().pos+offs] ## should probably check this
+
     def overflow(self):
         return len(self.parser_stack) >= self.max_level
 
     def not_expandable(self, ident):
-        return ident.token in self.no_expand
+        return not ident.expandable or ident.token in self.no_expand
 
     def defined(self, identifier):
         """
@@ -1459,7 +1496,7 @@ class MacroExpander:
         return [NumericalConstant("EXPANSION", identifier.line,
                                   identifier.prev_white, value)]
 
-    def expand(self, tokens, ident=None):
+    def expand(self, tokens, ident=None, pre_expand=False):
         """
         Expand a list of input tokens using the specified definitions.
         Return a list of new tokens, representing the result of macro
@@ -1469,96 +1506,100 @@ class MacroExpander:
             return [NumericalConstant("EXPANSION", -1, False, "0")]
 
         self.parser_stack.append(Parser(tokens))
+        self.top().pre_expand = pre_expand
         self.no_expand.append(str(ident))
 
-        prsr = self.top()
+        # import pdb
+        # pdb.set_trace()
+        try:
 
-        expanded_tokens = []
-        while not prsr.eol():
-            test_pos = prsr.pos
+            while not self.top().eol():
 
-            if not isinstance(
-                    prsr.tokens[test_pos],
-                    Identifier) or self.not_expandable(
-                    prsr.tokens[test_pos]):
-                expanded_tokens.append(prsr.cursor())
-                prsr.pos += 1
-                continue
-
-            if prsr.tokens[test_pos].token == 'defined':
-                try:
-                    tok = prsr.tokens[prsr.pos + 1]
-                    if tok.token == '(':
-                        ident = prsr.tokens[prsr.pos + 2]
-                        paren = prsr.tokens[prsr.pos + 3]
-                        if paren.token != ')':
-                            raise ParserError(
-                                "Expected closing paren to follow identifier following 'defined'")
-                        prsr.pos += 4
-                    else:
-                        ident = tok
-                        prsr.pos += 2
-                    if not isinstance(ident, Identifier):
-                        raise ParserError("Expected 'defined' to be followed by identifier")
-                    expanded_tokens.extend(self.defined(ident))
-                except IndexError:
-                    raise ParserError("Expected 'defined' to be followed by identifier")
-                continue
-
-            macro_lookup = self.platform.get_macro(str(prsr.tokens[test_pos]))
-            if not macro_lookup:
-                expanded_tokens.append(prsr.cursor())
-                prsr.pos += 1
-                continue
-
-            if isinstance(macro_lookup, MacroFunction):
-                if prsr.pos == len(prsr.tokens) - 1 or prsr.tokens[prsr.pos + 1].token != '(':
-                    expanded_tokens.append(prsr.cursor())
-                    prsr.pos += 1
+                if not isinstance(self.ctok(), Identifier):
+                    self.advance()
                     continue
-                args = []
-                current_arg = []
-                open_paren_count = 1
-                prsr.pos += 2
-                while True:
-                    if prsr.pos >= len(prsr.tokens):
-                        raise ParseError("Mismatched parentheses in macro argument.")
-                    tok = prsr.tokens[prsr.pos]
-                    if tok.token == ',' and open_paren_count == 1:
-                        args.append(current_arg)
-                        current_arg = []
-                        prsr.pos += 1
-                        continue
+                if self.ctok().token == 'defined':
+                    # This probably needs to be reworked, but we shouldn't encounter part of a defined clause in an expansion and trigger a context pop
+                    try:
+                        test_pos = self.top().pos
+                        tok = self.ctok(1)
+                        if tok.token == '(':
+                            ident = self.ctok(2)
+                            paren = self.ctok(3)
+                            if paren.token != ')':
+                                raise ParserError("Expected closing paren to follow identifier following 'defined'")
+                            self.advance(4, consume=True)
+                        else:
+                            ident = tok
+                            self.advance(2, consume=True)
+                        if not isinstance(ident, Identifier):
+                            raise ParserError("Expected 'defined' to be followed by identifier")
+                        self.top().tokens[self.top().pos] = self.defined(ident)
+                    except IndexError:
+                        raise ParserError("Expected 'defined' to be followed by identifier")
+                    continue
 
-                    if tok.token == '(':
-                        open_paren_count += 1
-                    elif tok.token == ')':
-                        open_paren_count -= 1
-                        if open_paren_count == 0:
+                print(f"{self.ctok()}{self.no_expand}")
+                if self.not_expandable(self.ctok()):
+                    self.ctok().expandable = False
+                    self.advance()
+
+                macro_lookup = self.platform.get_macro(str(self.ctok()))
+                if not macro_lookup:
+                    self.advance()
+                    continue
+
+                if isinstance(macro_lookup, MacroFunction):
+                    print(f"Expanding funcall {macro_lookup.name}")
+                    ## If you can't find a paren, pass on ident
+                    start_pos = self.top().pos
+                    args = []
+                    current_arg = []
+                    open_paren_count = 1
+                    self.advance(2, consume=True)
+                    while True:
+                        # Bail if we run out
+                        tok = self.ctok()
+                        if tok.token == ',' and open_paren_count == 1:
                             args.append(current_arg)
-                            prsr.pos += 1
-                            break
+                            current_arg = []
+                            self.advance(consume=True)
+                            continue
 
-                    current_arg.append(tok)
-                    prsr.pos += 1
+                        if tok.token == '(':
+                            open_paren_count += 1
+                        elif tok.token == ')':
+                            open_paren_count -= 1
+                            if open_paren_count == 0:
+                                args.append(current_arg)
+                                self.advance(consume=True)
+                                break
 
-                # Pre-scan
-                pre_expanded = [(arg, self.expand(arg, macro_lookup.name)) for arg in args]
-                # Proper expand
-                expanded_tokens.extend(
-                    self.expand(
-                        macro_lookup.expand(pre_expanded),
-                        macro_lookup.name))
-            elif type(macro_lookup) == Macro:
-                expanded_tokens.extend(self.expand(macro_lookup.expand(), macro_lookup.name))
-                prsr.pos += 1
-            else:
-                raise ParseError("Something weird happened")
+                        current_arg.append(tok)
+                        self.advance(consume=True)
 
-        self.parser_stack.pop()
-        self.no_expand.pop()
-        return expanded_tokens
-
+                    # Pre-scan
+                    pre_expanded = [(arg, self.expand(arg, macro_lookup.name, pre_expand=True)) for arg in args]
+                    # Proper expand
+#                    print(f"slicing out arguments: {self.top().tokens} -> {self.top().tokens[:start_pos] + self.top().tokens[self.top().pos:]}")
+                    # self.top().tokens = self.top().tokens[:start_pos] + self.top().tokens[self.top().pos:]
+                    print(f"TOP {self.top().tokens}")
+                    # self.top().pos = start_pos
+                    self.push(macro_lookup.expand(pre_expanded), macro_lookup.name)
+                elif type(macro_lookup) == Macro:
+                    print(f"Expanding macro {macro_lookup.name}")
+                    print(self.top().pos, "".join((str(x) for x in self.top().tokens)))
+                    del self.top().tokens[self.top().pos]
+                    print(self.top().pos, "".join((str(x) for x in self.top().tokens)))
+                    self.push(macro_lookup.expand(), macro_lookup.name)
+                else:
+                    raise ParseError("Something weird happened")
+        except EndofParse:
+            res_tokens =  self.top().tokens
+            if self.top().pre_expand:
+                self.parser_stack.pop()
+                self.no_expand.pop()
+            return res_tokens
 
 class ExpressionEvaluator(Parser):
     """
