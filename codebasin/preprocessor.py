@@ -1558,6 +1558,7 @@ class MacroExpander:
                     if paren.token != '(':
                         self.insert_tok(ctok)
                         self.insert_tok(paren)
+                        self.top().pos -= 1
                         continue
                     args = []
                     current_arg = []
