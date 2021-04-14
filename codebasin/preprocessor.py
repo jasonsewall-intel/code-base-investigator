@@ -1282,6 +1282,7 @@ class Macro:
                 raise RuntimeError("Found ## operator at start of replacement")
             elif self.replacement[-1].token == "##":
                 raise RuntimeError("Found ## operator at end of replacement")
+            self.replacement[0].prev_white = False
             self.preproc_replacement()
 
     def is_arg(self, tok):
@@ -1474,7 +1475,7 @@ class MacroExpander:
             top_toks + self.top().tokens[self.top().pos:]
 
     def push(self, tokens, ident=None):
-        self.parser_stack.append(Parser(dc(tokens)))
+        self.parser_stack.append(Parser(tokens))
         self.top().pre_expand = False
         self.no_expand.append(ident)
         self.overflow_check()
@@ -1591,9 +1592,15 @@ class MacroExpander:
                         arg_expansion = self.expand(arg, macro_lookup.name, pre_expand=True)
                         pre_expanded.append((arg, arg_expansion))
                     # Proper expand
-                    self.push(macro_lookup.replace(pre_expanded), macro_lookup.name)
+                    replacement = dc(macro_lookup.replace(pre_expanded))
+                    if isinstance(replacement, list) and len(replacement) > 0:
+                        replacement[0].prev_white = ctok.prev_white
+                    self.push(replacement, macro_lookup.name)
                 elif isinstance(macro_lookup, Macro):
-                    self.push(macro_lookup.replace(), macro_lookup.name)
+                    replacement = dc(macro_lookup.replace())
+                    if isinstance(replacement, list) and len(replacement) > 0:
+                        replacement[0].prev_white = ctok.prev_white
+                    self.push(replacement, macro_lookup.name)
                 else:
                     raise ParseError("Something weird happened")
         except EndofParse:
