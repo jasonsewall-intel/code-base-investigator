@@ -1512,6 +1512,9 @@ class MacroExpander:
         """
         self.overflow_check()
 
+        if len(tokens) == 0:
+            return tokens
+
         self.parser_stack.append(Parser(dc(tokens)))
         self.top().pre_expand = pre_expand
         self.no_expand.append(str(ident))
