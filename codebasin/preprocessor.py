@@ -1300,19 +1300,15 @@ class Macro:
                     res_tokens.append(last)
                     res_tokens.append(tok)
                     continue
-                else:
-                    last = [last]
                 idx += 1
                 nexttok = self.replacement[idx]
                 if self.is_arg(nexttok.token):
                     idx += 1
-                    res_tokens.append(last[0])
+                    res_tokens.append(last)
                     res_tokens.append(tok)
                     res_tokens.append(nexttok)
                     continue
-                else:
-                    nexttok = [nexttok]
-                lex = Lexer("".join([x.token for x in last + nexttok]))
+                lex = Lexer(last.token + nexttok.token)
                 tok = lex.tokenize_one()
                 if tok is None:
                     raise ParseError(
@@ -1397,6 +1393,8 @@ class MacroFunction(Macro):
                         last = input_args[argidx][0]  # Unexpanded arg
                     except ValueError:
                         last = [last]
+                else:
+                    last = [last]
                 idx += 1
                 nexttok = self.replacement[idx]
                 try:
@@ -1404,7 +1402,7 @@ class MacroFunction(Macro):
                     nexttok = input_args[argidx][0]  # Unexpanded arg
                 except ValueError:
                     nexttok = [nexttok]
-                lex = Lexer("".join([x.token for x in last + nexttok]))
+                lex = Lexer("".join((x.token for x in last + nexttok)))
                 tok = lex.tokenize_one()
                 if tok is None:
                     raise ParseError(
