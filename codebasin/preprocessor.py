@@ -22,6 +22,8 @@ log = logging.getLogger('codebasin')
 def toklist_print(toklist):
     out = []
     for tok in toklist:
+        if not tok:
+            continue
         if tok.prev_white:
             out.append(" ")
         out.append(str(tok))
@@ -1461,24 +1463,33 @@ class MacroFunction(Macro):
 
 class ExpanderHelper:
     def __init__(self, tokens):
-        self.done = []
-        self.todo = list(reversed(tokens))
+        self.tokens = copy(tokens)
+        self.pos = 0
         self.pre_expand = False
 
     def eol(self):
-        return len(self.todo) == 0
+        return self.pos >= len(self.tokens)
 
     def splice(self, upper_helper):
-        self.todo = self.todo + list(reversed(upper_helper.done))
+        start = list(filter(None, self.tokens[:self.pos]))
 
-    def peek(self):
-        return self.todo[-1]
+        self.tokens = start + list(filter(None, upper_helper.tokens)) + \
+            list(filter(None, self.tokens[self.pos:]))
+        self.pos = len(start)
 
-    def next(self):
-        return self.todo.pop()
+    def peek_tok(self):
+        t = self.tokens[self.pos]
+        return t
 
-    def emit(self, tok):
-        self.done.append(tok)
+    def chomp_tok(self):
+        t = self.tokens[self.pos]
+        self.tokens[self.pos] = None
+        self.pos += 1
+        return t
+
+    def replace_tok(self, item):
+        self.tokens[self.pos] = item
+        self.pos += 1
 
 
 class MacroExpander:
@@ -1509,10 +1520,15 @@ class MacroExpander:
         self.no_expand.append(ident)
         self.overflow_check()
 
-    def next_tok(self):
+    def advance_tok(self):
         while self.parser_stack[-1].eol():
             self.pop()
-        return self.parser_stack[-1].next()
+        self.parser_stack[-1].pos += 1
+
+    def peek_tok_pop(self):
+        while self.parser_stack[-1].eol():
+            self.pop()
+        return self.parser_stack[-1].peek_tok()
 
     def peek_tok(self):
         pos = len(self.parser_stack) - 1
@@ -1523,10 +1539,17 @@ class MacroExpander:
                 else:
                     pos -= 1
             else:
-                return self.parser_stack[pos].peek()
+                return self.parser_stack[pos].peek_tok()
 
-    def insert_tok(self, tok):
-        self.parser_stack[-1].emit(tok)
+    def chomp_tok(self):
+        while self.parser_stack[-1].eol():
+            self.pop()
+        return self.parser_stack[-1].chomp_tok()
+
+    def replace_tok(self, tok):
+        while self.parser_stack[-1].eol():
+            self.pop()
+        self.parser_stack[-1].replace_tok(tok)
 
     def overflow_check(self):
         if len(self.parser_stack) >= self.max_level:
@@ -1561,18 +1584,20 @@ class MacroExpander:
         try:
 
             while True:
-                ctok = self.next_tok()
+                ctok = self.peek_tok_pop()
 
                 if not isinstance(ctok, Identifier):
-                    self.insert_tok(ctok)
+                    self.advance_tok()
                     continue
 
+                _ = self.chomp_tok()
                 if ctok.token == 'defined':
                     try:
-                        tok = self.next_tok()
+                        tok = self.peek_tok()
                         if tok.token == '(':
-                            ident = self.next_tok()
-                            paren = self.next_tok()
+                            _ = self.chomp_tok()
+                            ident = self.chomp_tok()
+                            paren = self.peek_tok()
                             if paren.token != ')':
                                 raise ParserError(
                                     "Expected closing paren to follow identifier following 'defined'")
@@ -1580,7 +1605,7 @@ class MacroExpander:
                             ident = tok
                         if not isinstance(ident, Identifier):
                             raise ParserError("Expected 'defined' to be followed by identifier")
-                        self.insert_tok(self.defined(ident))
+                        self.replace_tok(self.defined(ident))
                     except IndexError:
                         raise ParserError("Expected 'defined' to be followed by identifier")
                     continue
@@ -1588,27 +1613,30 @@ class MacroExpander:
                 if self.not_expandable(ctok):
                     itok = copy(ctok)
                     itok.expandable = False
-                    self.insert_tok(itok)
+                    self.parser_stack[-1].pos -= 1
+                    self.replace_tok(itok)
                     continue
 
                 macro_lookup = self.platform.get_macro(str(ctok))
                 if not macro_lookup:
-                    self.insert_tok(ctok)
+                    self.parser_stack[-1].pos -= 1
+                    self.replace_tok(ctok)
                     continue
 
                 if isinstance(macro_lookup, MacroFunction):
                     paren = self.peek_tok()
                     if not paren or paren.token != '(':
-                        self.insert_tok(ctok)
+                        self.parser_stack[-1].pos -= 1
+                        self.replace_tok(ctok)
                         continue
                     else:
-                        self.next_tok()
+                        _ = self.chomp_tok()
                     args = []
                     current_arg = []
                     open_paren_count = 1
 
                     while True:
-                        tok = self.next_tok()
+                        tok = self.chomp_tok()
                         if tok.token == ',' and open_paren_count == 1:
                             args.append(current_arg)
                             current_arg = []
@@ -1643,7 +1671,7 @@ class MacroExpander:
                 else:
                     raise ParseError("Something weird happened")
         except EndofParse:
-            res_tokens = self.parser_stack[-1].done
+            res_tokens = list(filter(None, self.parser_stack[-1].tokens))
             self.parser_stack.pop()
             self.no_expand.pop()
             return res_tokens
