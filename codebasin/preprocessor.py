@@ -1449,6 +1449,28 @@ class MacroFunction(Macro):
         return substituted_tokens
 
 
+class ExpanderHelper:
+    def __init__(self, tokens):
+        self.done = []
+        self.todo = list(reversed(tokens))
+        self.pre_expand = False
+
+    def eol(self):
+        return len(self.todo) == 0
+
+    def splice(self, upper_helper):
+        self.todo = self.todo + list(reversed(upper_helper.done))
+
+    def peek(self):
+        return self.todo[-1]
+
+    def next(self):
+        return self.todo.pop()
+
+    def emit(self, tok):
+        self.done.append(tok)
+
+
 class MacroExpander:
     """
     A specialized token parser for recognizing and expanding macros.
@@ -1469,14 +1491,13 @@ class MacroExpander:
     def pop(self):
         if len(self.parser_stack) == 1 or self.top().pre_expand:
             raise EndofParse("Hit end of input streams")
-        top_toks = self.top().tokens
+        top_toks = self.top()
         self.parser_stack.pop()
         self.no_expand.pop()
-        self.top().tokens = self.top().tokens[:self.top().pos] + \
-            top_toks + self.top().tokens[self.top().pos:]
+        self.top().splice(top_toks)
 
     def push(self, tokens, ident=None):
-        self.parser_stack.append(Parser(tokens))
+        self.parser_stack.append(ExpanderHelper(tokens))
         self.top().pre_expand = False
         self.no_expand.append(ident)
         self.overflow_check()
@@ -1484,9 +1505,7 @@ class MacroExpander:
     def next_tok(self):
         while self.top().eol():
             self.pop()
-        tok = self.top().tokens[self.top().pos]
-        del self.top().tokens[self.top().pos]
-        return tok
+        return self.top().next()
 
     def peek_tok(self):
         pos = len(self.parser_stack) - 1
@@ -1497,12 +1516,10 @@ class MacroExpander:
                 else:
                     pos -= 1
             else:
-                return self.parser_stack[pos].tokens[self.parser_stack[pos].pos]
+                return self.parser_stack[pos].peek()
 
     def insert_tok(self, tok):
-        self.top().tokens = self.top().tokens[:self.top().pos] + \
-            [tok] + self.top().tokens[self.top().pos:]
-        self.top().pos += 1
+        self.top().emit(tok)
 
     def overflow_check(self):
         if len(self.parser_stack) >= self.max_level:
@@ -1530,7 +1547,7 @@ class MacroExpander:
         if len(tokens) == 0:
             return tokens
 
-        self.parser_stack.append(Parser(dc(tokens)))
+        self.parser_stack.append(ExpanderHelper(dc(tokens)))
         self.top().pre_expand = pre_expand
         self.no_expand.append(str(ident))
 
@@ -1616,7 +1633,7 @@ class MacroExpander:
                 else:
                     raise ParseError("Something weird happened")
         except EndofParse:
-            res_tokens = self.top().tokens
+            res_tokens = self.top().done
             self.parser_stack.pop()
             self.no_expand.pop()
             return res_tokens
