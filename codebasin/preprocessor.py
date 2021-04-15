@@ -1495,27 +1495,24 @@ class MacroExpander:
         # least 15, but cpp has been implemented to handle 200.
         self.max_level = 200
 
-    def top(self):
-        return self.parser_stack[-1]
-
     def pop(self):
-        if len(self.parser_stack) == 1 or self.top().pre_expand:
+        if len(self.parser_stack) == 1 or self.parser_stack[-1].pre_expand:
             raise EndofParse("Hit end of input streams")
-        top_toks = self.top()
+        top_toks = self.parser_stack[-1]
         self.parser_stack.pop()
         self.no_expand.pop()
-        self.top().splice(top_toks)
+        self.parser_stack[-1].splice(top_toks)
 
     def push(self, tokens, ident=None):
         self.parser_stack.append(ExpanderHelper(tokens))
-        self.top().pre_expand = False
+        self.parser_stack[-1].pre_expand = False
         self.no_expand.append(ident)
         self.overflow_check()
 
     def next_tok(self):
-        while self.top().eol():
+        while self.parser_stack[-1].eol():
             self.pop()
-        return self.top().next()
+        return self.parser_stack[-1].next()
 
     def peek_tok(self):
         pos = len(self.parser_stack) - 1
@@ -1529,7 +1526,7 @@ class MacroExpander:
                 return self.parser_stack[pos].peek()
 
     def insert_tok(self, tok):
-        self.top().emit(tok)
+        self.parser_stack[-1].emit(tok)
 
     def overflow_check(self):
         if len(self.parser_stack) >= self.max_level:
@@ -1558,7 +1555,7 @@ class MacroExpander:
             return tokens
 
         self.parser_stack.append(ExpanderHelper(tokens))
-        self.top().pre_expand = pre_expand
+        self.parser_stack[-1].pre_expand = pre_expand
         self.no_expand.append(str(ident))
 
         try:
@@ -1646,7 +1643,7 @@ class MacroExpander:
                 else:
                     raise ParseError("Something weird happened")
         except EndofParse:
-            res_tokens = self.top().done
+            res_tokens = self.parser_stack[-1].done
             self.parser_stack.pop()
             self.no_expand.pop()
             return res_tokens
