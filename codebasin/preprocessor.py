@@ -1293,8 +1293,8 @@ class Macro:
             self.replacement[0].prev_white = False
             self.preproc_replacement()
 
-    def is_arg(self, tok):
-        return False
+    def which_arg(self, tok):
+        return -1
 
     def preproc_replacement(self):
         res_tokens = []
@@ -1304,14 +1304,16 @@ class Macro:
             tok = self.replacement[idx]
             if tok.token == '##':
                 last = res_tokens.pop()
-                if self.is_arg(last.token):
+                arg_idx = self.which_arg(last.token)
+                if arg_idx != -1:
                     idx += 1
                     res_tokens.append(last)
                     res_tokens.append(tok)
                     continue
                 idx += 1
                 nexttok = self.replacement[idx]
-                if self.is_arg(nexttok.token):
+                arg_idx = self.which_arg(nexttok.token)
+                if arg_idx != -1:
                     idx += 1
                     res_tokens.append(last)
                     res_tokens.append(tok)
@@ -1323,6 +1325,10 @@ class Macro:
                 if tok is None:
                     raise ParseError(
                         f"Concatenation didn't result in valid token {lex.string}")
+            elif isinstance(tok, Identifier):
+                arg_idx = self.which_arg(tok.token)
+                if arg_idx != -1:
+                    self.arg_needs_expansion[arg_idx] = True
             idx += 1
             res_tokens.append(tok)
         self.replacement = res_tokens
@@ -1357,11 +1363,14 @@ class MacroFunction(Macro):
             else:
                 # Strip '...' from argument name
                 self.args[-1] = self.args[-1][:-3]
-
+        self.arg_needs_expansion = [False for x in self.args]
         super().__init__(name, replacement)
 
-    def is_arg(self, tok):
-        return tok in self.args
+    def which_arg(self, tok):
+        try:
+            return self.args.index(tok)
+        except ValueError:
+            return -1
 
     def __repr__(self):
         return "MacroFunction(name={0!r},args={1!r},replacement={2!r})".format(
@@ -1447,7 +1456,6 @@ class MacroFunction(Macro):
                 last_cat = False
                 res_tokens.append(tok)
             idx += 1
-
 
         # Substitute each occurrence of an argument in the replacement
         substituted_tokens = []
@@ -1661,9 +1669,13 @@ class MacroExpander:
                         current_arg.append(tok)
 
                     pre_expanded = []
-                    for arg in args:
-                        arg_expansion = self.expand(arg, ident=None, pre_expand=True)
-                        pre_expanded.append((arg, arg_expansion))
+                    for i, arg in enumerate(args):
+                        if i >= len(
+                                macro_lookup.arg_needs_expansion) or macro_lookup.arg_needs_expansion[i]:
+                            arg_expansion = self.expand(arg, ident=None, pre_expand=True)
+                            pre_expanded.append((arg, arg_expansion))
+                        else:
+                            pre_expanded.append((arg,))
                     # Proper expand
                     replacement = macro_lookup.replace(pre_expanded)
                     if isinstance(replacement, list) and len(replacement) > 0:
